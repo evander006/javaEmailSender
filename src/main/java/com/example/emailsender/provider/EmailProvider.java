@@ -5,6 +5,7 @@ import com.example.emailsender.service.EmailService;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import jakarta.mail.MessagingException;
+import jakarta.mail.internet.InternetAddress;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -34,14 +35,18 @@ public class EmailProvider implements EmailService {
         final var message = javaMailSender.createMimeMessage();
         try {
             final MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-            helper.setFrom(mailSender);
+
+            helper.setFrom(new InternetAddress(mailSender, "Минскэнерго"));
             helper.setTo(recipientEmail);
             helper.setSubject(subject);
             helper.setText(messageText);
-            final String attachmentName = fileName == null || fileName.isBlank() ? "document.pdf" : fileName;
+
+            final String attachmentName = (fileName == null || fileName.isBlank()) ? "document.pdf" : fileName;
             helper.addAttachment(attachmentName, new ByteArrayResource(pdf), "application/pdf");
+
             javaMailSender.send(message);
-        } catch (MessagingException e) {
+            log.info("Успешно отправлено на: {}", recipientEmail);
+        } catch (Exception e) {
             throw new BusinessException("Ошибка отправки email-сообщения: " + e.getMessage(), e);
         }
     }
@@ -52,23 +57,15 @@ public class EmailProvider implements EmailService {
                                       String fileName,
                                       byte[] pdf,
                                       Throwable throwable) {
-        log.warn("Использован fallback для sendSignedPdf, состояние - [{}]. Причина: {}",
-                circuitBreaker.getState(),
-                throwable.getMessage());
+        log.warn("Сработал fallback для отправки на {}. Состояние CB: [{}]. Причина: {}",
+                recipientEmail, circuitBreaker.getState(), throwable.getMessage());
+
         final String errMsg = CircuitBreaker.State.OPEN.equals(circuitBreaker.getState())
                 ? "Почтовый сервис временно недоступен. Мы работаем над устранением ошибки"
                 : "Ошибка отправки email-сообщения: " + throwable.getMessage();
+
         throw new BusinessException(errMsg, throwable);
     }
 
-    @Override
-    public void fallbackEmail(String recipientEmail, String subject, String messageText, Throwable throwable) {
-        log.warn("Использован fallback для sendEmail, состояние - [{}]. Причина: {}",
-                circuitBreaker.getState(),
-                throwable.getMessage());
-        final String errMsg = CircuitBreaker.State.OPEN.equals(circuitBreaker.getState()) ?
-                "Почтовый сервис временно недоступен. Мы работаем над устранением ошибки" :
-                "Ошибка отправки email-сообщения";
-        throw new BusinessException(errMsg);
-    }
+
 }
